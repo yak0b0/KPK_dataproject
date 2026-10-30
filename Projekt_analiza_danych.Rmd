@@ -1,0 +1,145 @@
+---
+title: "Projekt Analiza Danych"
+output: 
+  html_document:
+    theme: united
+    highlight: tango
+    toc: true
+    toc_float: true
+date: "2026-10-22"
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(DataExplorer)
+```
+
+
+# Opis zbioru
+
+Zbiór zawiera ponad 4000 obserwacji danych dotyczących drużyn z NCAA (1 dywizja rozgrywek uczelnianych koszykówki w USA) na przestrzeni 12 sezonów (od 2013 do 2025) z pominięciem 2020 roku - ze względu na COVID19. W zbiorze zawarte są 3 zmienne kategoryczne oraz 21 zmiennych ilościowych. Zbiór danych został znaleziony na [Kaggle](https://www.kaggle.com/datasets/andrewsundberg/college-basketball-dataset) i jest autorstwa *Andrew Sundberg*. On natomiast pozyskał dane ze strony [Barttorvik](http://barttorvik.com/trank.php#).
+
+
+
+# Opis zmiennych
+
+* **TEAM** - Zmienna opisująca nazwę drużyny biorącą udział w turnieju March Madness. Jest to nazwa uczelni, którą reprezentuje dana drużyna np. Duke, Gonzaga czy Texas Tech
+
+* **CONF** - Zmienna opisująca nazwę konferecji (ligi) w której, w sezonie zasadniczym (rozgrywki odbywające się przed turniejem finałowym March Madness) dana drużyna rozgrywa mecze np. B12 - Big 12 (konferencja zrzeszająca największe uczelnie z Arizony, Utah, Ohio, Florydy, Colorado, Texasu, Iowa, Kansas, Wirginii Zachodniej i Oklahomy.
+
+* **G** - Zmienna opisująca liczbę meczów rozegranych przez dany zespół w sezonie/roku.
+
+* **W** - Zmienna opisująca liczbę meczów wygranych przez zespół.
+
+* **ADJOE** - Adjusted Offensive Efficiency - zmienna opisująca przewidywaną ilość punktów na 100 posiadań (przeprowadzonych akcji), jaką zdobyłaby drużyna przeciwko innej na tym samym poziomie.
+
+* **ADJDE** - Adjusted Defensive Efficiency - zmienna opisująca przewidywaną ilość straconych punktów na 100 akcji obronnych, jaką straciłaby drużyna przeciwko innej na tym samym poziomie.
+
+* **BARTHAG** - Zmienna, opisująca power rating (szansę na pokonanie drużyny na tym samym poziomie).
+
+* **EFG_O** - Effective Field Goal Percentage Shot - zmienna opisująca statystykę w koszykówce, która koryguje klasyczny procent rzutów z gry, uwzględniając wyższą wartość rzutów za trzy punkty. Jej wzór to: (celne rzuty z gry + 0,5 \* celne rzuty za 3) / (wszystkie próby rzutów z gry).
+
+* **EFG_D** - Effective Field Goal Percentage Allowed - zmienna opisująca statystykę analogiczną do EFG_O, z tą różnicą, że EFG_D dotyczny rzutów przeciwko danej drużynie (oddanych przez rywala).
+
+* **TOR** - Turnover Rate - zmienna opisująca wskaźnik strat, czyli odsetek akcji drużyny, które kończą się stratą piłki (turnover).  Wzór to: 100 \* straty / (rzuty z gry + 0,44 \* rzuty wolne + straty). Im mniejszy wskaźnik, tym lepiej.
+
+* **TORD** - Turnover Percentage Comitted (Steal Rate) - zmienna opisująca analogiczny do TOR wskaźnik, różni się o poprzedniego tym, że dotyczy sytuacji, gdy to badana drużyna 'zabiera' piłkę drużynie przeciwnej.'
+
+* **ORB** - Offensive Rebound Rate - zmienna opisująca statystykę określającą odsetek własnych rzutów niecelnych, jakie dany zespół zbiera w ataku. Wzór to: zbiórki w ataku / (zbiórki w ataku + zbiórki w obronie przeciwnika)
+
+* **DRB** - Offensive Rebound Rate Allowed - zmienna opisująca statystykę analogiczną do ORB, z tą różnicą, że DRB dotyczy drużyny przeciwnej
+
+* **FTR** - Free Throw Rate - zmienna opisująca statystykę dotyczącą rzutów wolnych (jak często, w stosunku do liczby rzutów z gry, dany zespół oddaje rzuty wolne). Wzór to: liczba oddanych rzutów wolnych / liczba oddanych rzutów z gry
+
+* **FTRD** - Free Throw Rate Allowed - zmienna opisująca analogiczną do FTR statystykę dotyczącą rzutów wolnych, tak jak w poprzednich zmiennych różnica polega na tym, że FTRD dotyczy drużyny przeciwnej
+
+* **X2P_O i X3P_O** - Zmienne opisujące procentową skuteczność rzutów odpowiednio za 2 i 3 punkty. Wzór to: (liczba rzutów celnych / liczba oddanych rzutów) \* 100
+
+* **X2P_D i X3P_D** - Zmienne opisujące procentową skuteczność rzutów drużyny przeciwnej odpowiednio za 2 i 3 punkty. Wzór to: (liczba rzutów celnych / liczba oddanych rzutów) \* 100
+
+* **ADJ_T** - Adjusted Tempo - zmienna opisująca tempo gry danego zespołu, czyli liczba posiadań (rozegranych akcji) na 40 minut (długość meczu koszykówki akademickiej)
+
+* **WAB** - Wins Above Bubble - zmienna opisująca statystykę określającą trudność terminarza danej drużyny. WAB określa liczbę wygranych meczów przez daną drużynę w porównaniu z liczbą wygranych, jaką osiągnęłaby 'średnia' drużyna. Np. przewidywany 'rekord' danej drużyny w 30 meczach wynosi 13 - 17, ale w rzeczywistości drużyna osiąga 10 - 20, wtedy WAB wynosi -3.0. W praktyce więc WAB określa w jakim stopniu zespół spełnił lub nie spełnił przedsezonowych oczekiwań.
+
+* **POSTSEASON** - Zmienna opisująca wynik w turnieju March Madness, jaki osiągnęła dana drużyna np. F4 - Final Four (półfinał turnieju)
+
+* **SEED** - Zmienna opisująca 'miejsce' z jakim drużyna wchodzi do turnieju March Madness
+
+* **YEAR** - Rok w którym odbywa się turniej March Madness
+
+
+# Wczytanie i wstępna eksploracja danych 
+
+```{r}
+
+dane_projekt <- read.csv('cbb.csv')
+dim(dane_projekt)  # wymiary(wiersze, kolumny)
+head(dane_projekt) # wyswietlam kilka pierwszych wierszy
+colSums(is.na(dane_projekt)) # sprawdzam braki danych 
+
+```
+
+## Histogramy zmiennych
+
+```{r plot-all-histograms}
+
+dane_projekt |> 
+  select(where(is.numeric)) |> 
+    pivot_longer(
+      cols = everything(),
+      names_to = "variable",
+      values_to = "value"
+    ) |> 
+  ggplot(aes(x = value))+
+  geom_histogram(bins = 30, fill = "steelblue", color = "white")+
+  facet_wrap(~ variable, scales = "free")+
+  theme_minimal()+
+  labs(
+    title = "Histogramy"
+  )
+```
+
+
+
+## Wnioski ze wstępnej eksploracji danych
+
+  1.Rozmiar zbioru: Zbiór składa się z 4249 obserwacji oraz 24 zmiennych. 
+  
+  
+  2.Zakres danych:  Zbiór łączy metryki identyfikacyjne drużyn (TEAM, CONF, YEAR) z rozbudowanym zestawem 21 statystyk koszykarskich (m.in. tempo gry, skorygowana efektywność ataku i obrony oraz wskaźniki rzutowe i zbiórek).
+
+  3.Analiza braków danych: 
+  
+  * Wartości brakujące występują jedynie w dwóch kolumnach: POSTSEASON oraz SEED. W sumie jest to **3433 braków**. 
+  * Braki te są spowodowane tym, że w każdym sezonie rywalizuje około 350 drużyn, natomiast do do turnieju *March Madness* kwalifikuje się tylko 68 drużyn (wliczając 8 zespołów grających w rundzie wstępnej *First Four* - `R68`). 
+  * Z tego względu dokładnie 816 rekordów posiada przypisany numer rozstawienia oraz wynik w turnieju ($12 \text{ sezonów} \times 68 \text{ drużyn} = 816$), a pozostałe 3433 wiersze to drużyny, które zakończyły zmagania przed fazą pucharową.
+
+
+# Zmienna WIN_PCT 
+
+Ponieważ drużyny rozgrywają w sezonie różną liczbę meczów (`G`), sama liczba wygranych (`W`)nie pozwala na obiektywne porównywanie zespołów. Wprowadzamy zmienną `WIN_PCT` określającą odsetek zwycięstw w sezonie:
+
+```{r}
+dane_projekt$WIN_PCT <- round((dane_projekt$W/ dane_projekt$G) * 100, 2)
+head(dane_projekt[, c("TEAM", "CONF", "YEAR", "G", "W", "WIN_PCT", "SEED")])
+```
+
+### Plan na dalszą część projektu: Symulacja drabinki turniejowej
+
+W kolejnym etapie projektu planujemy:
+
+1. **Wybrać jeden konkretny sezon**.
+
+2. **Wyodrębnić główną drabinkę turnieju** (*Round of 64* – 64 zespoły z przypisanym `SEED`).
+
+3. **Zbudować model predykcyjny / ranking siły** oparty na procencie wygranych (`WIN_PCT`), ogólnej sile zespołu (`BARTHAG`)oraz wskaźnikach efektywności ataku i obrony (`ADJOE`, `ADJDE`).
+
+4. **Zasymulować własną drabinkę turniejową** i porównać ją z rzeczywistymi wynikami fazy pucharowej (`POSTSEASON`), sprawdzając, gdzie doszło do największych niespodzianek.
+
+
+##### <https://www.basketball-reference.com/>
+
+##### <https://www.kaggle.com/datasets/andrewsundberg/college-basketball-dataset> 
