@@ -75,11 +75,11 @@ Zbiór zawiera ponad 4000 obserwacji danych dotyczących drużyn z NCAA (1 dywiz
 
 - **SEED** - Zmienna opisująca 'miejsce' (numer rozstawienia w regionie od 1 do 16), z jakim drużyna wchodzi do turnieju March Madness (dla drużyn spoza turnieju przyjmuje wartość `NA`). Zmienna porządkowa (numer rozstawienia), bez jednostki.
 
-- **YEAR** - Rok, w którym odbywa się turniej March Madness. Jednostka: rok kalendarzowy [rok] (wartość całkowita, np. `2019`).
-# Wczytanie i wstępna eksploracja danych
+- **YEAR** - Rok, w którym odbywa się turniej March Madness. Jednostka: rok kalendarzowy [rok] (wartość całkowita, np. `2019`). \# Wczytanie i wstępna eksploracja danych
+
+# Wstępna eksploracja danych 
 
 ```{r}
-
 dane_projekt <- read.csv('cbb.csv')
 dim(dane_projekt)  # wymiary(wiersze, kolumny)
 head(dane_projekt) # wyswietlam kilka pierwszych wierszy
@@ -107,7 +107,50 @@ dane_projekt |>
   )
 ```
 
-Histogramu zmiennej `YEAR` nie uwzględniamy ponieważ nie ma większego sensu. 
+Histogramu zmiennej `YEAR` nie uwzględniamy ponieważ nie ma większego sensu.
+
+## Korelacja 
+
+```{r plot-correlation-matrix}
+library(corrplot)
+dane_num <- dane_projekt |> 
+  select(where(is.numeric), -YEAR)
+head(dane_num)
+
+korelacja <- cor(dane_num)
+
+paleta_kolo_light <- colorRampPalette(c(
+  "#5E3C99", "#0072B2", "#00A087",  # zimne 
+  "#F7F7F7",                        # neutralne
+  "#FDE725", "#FF7F0E", "#D62728"   # ciepłe 
+))(21)
+
+corrplot(
+  korelacja,
+  method = "pie",
+  type = "upper",
+  diag = FALSE,
+  col = paleta_kolo_light,
+  tl.col = "black",
+  tl.cex = 0.8,
+  tl.srt = 45
+)
+```
+
+Na wykresie widać, że większość zmiennych w zbiorze jest ze sobą słabo powiązana (dużo jasnych, prawie pustych kół). Dotyczy to szczególnie tempa gry (`ADJ_T`), strat (`TOR`, `TORD`) oraz wskaźników rzutów wolnych (`FTR`, `FTRD`) – sam styl gry nie przesądza więc jeszcze o wynikach drużyny. Wyraźne skupiska mocnych zależności widać głównie w górnej części macierzy (wokół zwycięstw i ogólnej siły zespołu) oraz przy statystykach rzutowych. Poniżej zestawiono 10 najsilniejszych par wraz z dokładnymi wartościami. 2. Pod tabelką (top 10 korelacji)
+
+```{r}
+najw_kor <- korelacja
+najw_kor[lower.tri(najw_kor, diag = TRUE)] <- NA
+
+as.data.frame(as.table(najw_kor)) |>
+  na.omit() |>
+  rename(Zmienna_1 = Var1, Zmienna_2 = Var2, Korelacja = Freq) |>
+  arrange(desc(abs(Korelacja))) |>
+  head(10)
+```
+
+W tabeli powyżej widać 10 najsilniejszych korelacji w zbiorze (wszystkie powyżej 0,78). Najmocniej powiązane są ze sobą wskaźniki ogólnej siły drużyny (`BARTHAG` i `WAB`: 0,93) oraz statystyki rzutowe (`EFG_D` z `X2P_D` i `EFG_O` z `X2P_O` – ok. 0,90), co wynika z tego, że efektywność rzutowa jest liczona bezpośrednio z rzutów za 2 i 3 punkty. Zestawienie dobrze też pokazuje, że o sile zespołu i liczbie wygranych (`W`) decydują prawie w równym stopniu skuteczny atak (`ADJOE`) i solidna obrona (`ADJDE`, gdzie korelacja jest ujemna, bo im mniej straconych punktów, tym lepiej).
 
 ## Wnioski ze wstępnej eksploracji danych
 
