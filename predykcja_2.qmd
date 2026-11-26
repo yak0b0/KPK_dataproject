@@ -1,0 +1,323 @@
+---
+title: "Predykcja - model bazowy (tylko zwycięstwa)"
+format: html
+editor: visual
+---
+
+# Cel i hipotezy badawcze  
+
+Celem tego etapu jest zbudowanie prostego punktu odniesiania dla predykcji awansu drużyny NCAA do turnieju *March Madness* wyłącznie na podstawie bilansu zwycięstw z sezonu zasadniczego. Pozwala to ocenić, ile informacji niesie sama liczba lub odsetek wygranych, zanim do modelu w późniejszych krokach dołączymy bardziej zaawansowane zmienne (metryki).  
+
+Formułujemy następujące hipotezy badawcze dla modelu bazowego:  
+
++ $H_1$ - **Istotność statystyczna bilansu zwycięstw** - Zarówno liczzba zwycięstw jak i odsetek zwycięstw istotnie statystycznie wpływają na logarytm szans awansu do turnieju *March Madness* ($H_0 : \beta_1 = 0$ przeciwko $H_1 : \beta_1 > 0$)  
+
++ $H_2$ - **Przewaga liczba zwycięstw nad osetkiem zwycięstw** - Model wykorzystujący bezwzględną liczbę zwycięstw charakteryzuje się lepszym dopasowaniem oraz wyższą zdolnością dyskryminacyjną na zbiorze testowym niż model oparty na odsetku zwycięstw, ponieważ zespoły z silniejszych konferencji rozgrywają więcej spotkań.  
+
++ $H_3$ - **Ograniczenie modeli opartych wyłącznie na zwycięstwach** - Mimo wysokiej ogólnej seperacji, modele bazowe zawyżają prawdopodobieństwo awansu drużyn ze słabyszch konferencji o dużej liczbie wygranych ponieważ nie uwzględniają siły przeciwników.  
+
+# Wczytanie danych + bibliotek  
+
+```{r}
+#| label: biblioteki
+#| message: false
+#| warning: false
+#| include: false
+library(tidyverse)
+library(pROC)
+library(PRROC)
+library(ranger)
+library(car)
+```
+
+```{r}
+cbb_win <- read.csv("cbb.csv", check.names = FALSE) |>
+  mutate(
+    SEED = na_if(trimws(as.character(SEED)), ""),
+    SEED = if_else(SEED == "N/A", NA_character_, SEED),
+    in_tourney = if_else(!is.na(SEED), 1L, 0L),
+    in_tourney_f = factor(in_tourney, levels = c(0, 1), labels = c("No", "Yes")),
+    WIN_PCT = pmin(pmax(W / G, 0), 1)
+  )
+```
+
+Wczytując dane odrazu dokonujemy pewnych modyfikacji:  
+
++ Ze względu na braki danych w kolumnie `SEED` które występują w dwóch postaciach; `NA` oraz `"N/A"` - ujednolicamy to  
+
++ Tworzymy zmienną celu `in_tourney` która jest zmienną binarną przyjmującą wartość 1 w przypadku gdy drużyna awansowała do turnieju *March Madness* (w takim przypadku drużyna jest rozstawiona i nie ma `NA` w kolumnie `SEED`), lub 0 gdy drużyna nie awansowała do turnieju *March Madness* (`NA` w kolumnie `SEED`).  
+
++ Liczymy odsetek zwycięstw `WIN_PCT`, używamy funkcji `pmin` i `pmax` aby uniknąć sytuacji gdzie liczba wygranych meczów przekracza liczbę rozegranych.  
+
+# Predykcja - podział czasowy
+
+Naszym zbiorem treningowym będą sezony 2013 - 2023, a naszym zbiorem testowym będzie sezon 2024.  
+
+Zbiór treningowy `train_win` liczy 3523 obserwacji, a zbiór testowy `test_win` liczy 362 obserwacji.  
+
+```{r}
+train_win <- cbb_win |> filter(YEAR <= 2023)
+test_win  <- cbb_win |> filter(YEAR == 2024)
+```
+
+
+# Estymacja modeli regresji logistycznej + testy statystyczne  
+
+Stworzymy i będziemy przyglądać się dwóm modelem regresji logistycznej, jeden zbudowany na liczbie wygranych meczów a drugi na odsetku wygranych meczów.  
+
+Estymujemy model postaci:
+   $$\ln\left(\frac{P(\text{in\_tourney}=1)}{1 - P(\text{in\_tourney}=1)}\right) = \beta_0 + \beta_1 X$$
+   gdzie predyktorem $X$ jest kolejno liczba zwycięstw (`W`) oraz odsetek zwycięstw (`WIN_PCT`)  
+
+```{r}
+model_w <- glm(in_tourney ~ W, data = train_win, family = binomial())
+summary(model_w)
+
+model_wp <- glm(in_tourney ~ WIN_PCT, data = train_win, family = binomial())
+summary(model_wp)
+```
+
+```{r}
+#| label: testy statystyczne
+anova(model_w, test = "Chisq")
+anova(model_wp, test = "Chisq")
+```
+
+```{r}
+#| label: odds ratio
+
+or_w <- exp(coef(model_w))
+ci_w <- exp(confint(model_w))
+cbind(OR = or_w, ci_w)
+
+or_wp <- exp(coef(model_wp))
+ci_wp <- exp(confint(model_wp))
+cbind(OR = or_wp, ci_wp)
+```
+```{r}
+#| label: porownanie
+mcfadden_w  <- 1 - (model_w$deviance / model_w$null.deviance)
+mcfadden_wp <- 1 - (model_wp$deviance / model_wp$null.deviance)
+
+tibble(
+  Model = c("Model W (liczba zwycięstw)", "Model WIN_PCT (odsetek zwycięstw)"),
+  AIC = round(c(AIC(model_w), AIC(model_wp)), 2),
+  Residual_Deviance = round(c(model_w$deviance, model_wp$deviance), 2),
+  McFadden_R2 = round(c(mcfadden_w, mcfadden_wp), 4)
+)
+```
+
+# Predykcja + ewaluacja
+
+Ponieważ do *March Madness* awansuje ok. 19% drużyn (68 z ok. 360 w sezonie), klasy są niezbalansowane. `ROC-AUC` ocenia ogólną zdolność rozróżniania drużyn turniejowych od nieturniejowych w całym zakresie progów, natomiast `PR-AUC` jest znacznie bardziej wrażliwy na błędy fałszywie pozytywne wśród drużyn typowanych na szczycie rankingu.
+
+```{r}
+#| label: predykcja
+test_win <- test_win |>
+  mutate(pred_prob = predict(model_w, newdata = test_win, type = "response"))
+
+test_winp <- test_win |>
+  mutate(pred_prob = predict(model_wp, newdata = test_win, type = "response"))
+
+roc_w <- pROC::roc(test_win$in_tourney, test_win$pred_prob, quiet = TRUE)
+pr_w  <- PRROC::pr.curve(
+  scores.class0 = test_win$pred_prob[test_win$in_tourney == 1],
+  scores.class1 = test_win$pred_prob[test_win$in_tourney == 0],
+  curve = FALSE
+)
+
+roc_wp <- pROC::roc(test_winp$in_tourney, test_winp$pred_prob, quiet = TRUE)
+pr_wp  <- PRROC::pr.curve(
+  scores.class0 = test_winp$pred_prob[test_winp$in_tourney == 1],
+  scores.class1 = test_winp$pred_prob[test_winp$in_tourney == 0],
+  curve = FALSE
+)
+```
+
+```{r}
+cat("ROC AUC (tylko W):", round(pROC::auc(roc_w), 4), "\n")
+cat("PR AUC  (tylko W):", round(pr_w$auc.integral, 4), "\n")
+cat("ROC AUC (tylko WP):", round(pROC::auc(roc_wp), 4), "\n")
+cat("PR AUC  (tylko WP):", round(pr_wp$auc.integral, 4), "\n")
+```
+
+```{r}
+#| label: test delonga
+roc.test(roc_w, roc_wp, method = "delong")
+```
+
+
+```{r}
+test_win |>
+  arrange(desc(pred_prob)) |>
+  select(TEAM, CONF, W, G, SEED, in_tourney, pred_prob) |>
+  slice_head(n = 20)
+```
+
+```{r}
+test_winp |>
+  arrange(desc(pred_prob)) |>
+  select(TEAM, CONF, W, G, SEED, in_tourney, pred_prob) |>
+  slice_head(n = 20)
+```
+
+# Analiza wyników i statystyczna weryfikacja hipotez
+
+### Weryfikacja H1: Istotność wpływu zwycięstw na szanse awansu
+* **Wyniki estymacji dla `model_w` (`in_tourney ~ W`):**
+  * Wyraz wolny: $\hat{\beta}_0 = -9{,}0191$ ($\text{SE} = 0{,}3260$, $z = -27{,}66$, $p < 2 \cdot 10^{-16}$).
+  * Współczynnik przy `W`: $\hat{\beta}_1 = 0{,}3916$ ($\text{SE} = 0{,}0152$, $z = 25{,}72$, $p < 2 \cdot 10^{-16}$).
+  * Redukcja dewiancji względem modelu zerowego: spadek z $3456{,}5$ (przy $3522$ df) do $1904{,}9$ (przy $3521$ df), co daje statystykę testu ilorazu wiarygodności $\Delta D = 1551{,}6$ przy $1$ stopniu swobody ($p < 2{,}2 \cdot 10^{-16}$).
+  * **Interpretacja praktyczna:** Iloraz szans wynosi $\text{OR} = e^{0{,}3916} \approx 1{,}479$, co oznacza, że **każde dodatkowe zwycięstwo zwiększa szanse (*odds*) awansu do *March Madness* średnio o ok. $47{,}9\%$**. Punkt przecięcia dla prawdopodobieństwa $p = 0{,}50$ wypada przy $W = 9{,}0191 / 0{,}3916 \approx 23{,}03$ zwycięstwa.
+* **Wyniki estymacji dla `model_wp` (`in_tourney ~ WIN_PCT`):**
+  * Wyraz wolny: $\hat{\beta}_0 = -10{,}0110$ ($\text{SE} = 0{,}3706$, $z = -27{,}01$, $p < 2 \cdot 10^{-16}$).
+  * Współczynnik przy `WIN_PCT`: $\hat{\beta}_1 = 14{,}0378$ ($\text{SE} = 0{,}5558$, $z = 25{,}26$, $p < 2 \cdot 10^{-16}$).
+  * Redukcja dewiancji: spadek z $3456{,}5$ do $2046{,}7$ ($\Delta D = 1409{,}8$, $p < 2{,}2 \cdot 10^{-16}$), a próg $p = 0{,}50$ odpowiada odsetkowi wygranych $\text{WIN\_PCT} \approx 71{,}3\%$.
+* **Wniosek dla H1:** **Hipoteza H1 została w pełni potwierdzona statystycznie** ($p < 2 \cdot 10^{-16}$ dla obu predyktorów w teście Walda i teście ilorazu wiarygodności).
+
+### Weryfikacja H2: Porównanie `W` oraz `WIN_PCT`
+* **Dopasowanie na zbiorze treningowym (2013–2023):**
+  * Model oparty na liczbie zwycięstw `W` osiąga wyraźnie niższe kryterium informacyjne Akaikego ($\text{AIC} = 1908{,}9$ wobec $\text{AIC} = 2050{,}7$ dla `WIN_PCT`, różnica $\Delta\text{AIC} = 141{,}8$) oraz wyższy współczynnik determinacji McFaddena ($R^2_{\text{McFadden}} = 0{,}4489$ wobec $0{,}4079$).
+* **Predykcja na zbiorze testowym (sezon 2024):**
+  * Dla modelu `W`: $\text{ROC-AUC} = 0{,}9393$, $\text{PR-AUC} = 0{,}7920$.
+  * Dla modelu `WIN_PCT`: $\text{ROC-AUC} = 0{,}9081$, $\text{PR-AUC} = 0{,}6557$.
+  * Przewaga modelu `W` wynosi $+0{,}0312$ punktu w `ROC-AUC` oraz aż $+0{,}1363$ punktu w `PR-AUC` (test DeLonga w kroku 4 pozwala dodatkowo potwierdzić istotność różnicy krzywych ROC).
+* **Przyczyna merytoryczna:** Zespoły z silniejszych konferencji rozgrywają więcej meczów (`G = 33–34`) niż drużyny z mniejszych lig (np. Ivy League: `G = 26–27`). W rezultacie `WIN_PCT` sztucznie premiuje zespoły o krótszym terminarzu (np. Princeton `24/26` – `pred_prob = 0.9501`, Cornell `22/27` – `pred_prob = 0.8065`, obie bez awansu).
+* **Wniosek dla H2:** **Hipoteza H2 została potwierdzona** – bezwzględna liczba zwycięstw `W` jest istotnie lepszym predyktorem awansu niż odsetek zwycięstw `WIN_PCT`.
+
+### Weryfikacja H3: Ograniczenia modeli opartych wyłącznie na zwycięstwach
+* **Analiza błędów w TOP 20 sezonu 2024:**
+  * W rankingu modelu `W` wśród 20 najwyżej ocenionych drużyn aż **2 zespoły nie awansowały do turnieju** (10% błędów fałszywie pozytywnych w ścisłej czołówce): `Indiana St.` (`28–33`, MVC, `pred_prob = 0.8750`) oraz `Appalachian St.` (`27–31`, Sun Belt, `pred_prob = 0.8255`).
+  * W rankingu modelu `WIN_PCT` w TOP 20 pojawiają się już **4 drużyny bez awansu** (20%): `Princeton` (`24–26`, `0.9501`), `Appalachian St.` (`27–31`, `0.9016`), `Indiana St.` (`28–33`, `0.8699`), `Cornell` (`22–27`, `0.8065`) oraz `High Point` (`25–31`, `0.7875`) – łącznie **5 zespołów** w pierwszej dwudziestce!
+  * **Brak rozróżnialności przy równej liczbie wygranych:** Model z jednym dyskretnym predyktorem `W` przypisuje identyczne prawdopodobieństwo (`0.8255`) wszystkim drużynom z 27 zwycięstwami – zarówno potęgom z silnych konferencji (`North Carolina` – `SEED 1`, `Iowa St.` – `SEED 2`, `Auburn` – `SEED 4`), jak i zespołowi `Appalachian St.`, który w ogóle nie dostał się do turnieju.
+* **Wniosek dla H3:** **Hipoteza H3 została potwierdzona** – wysoki `ROC-AUC` ($0{,}9393$) przy wyraźnie niższym `PR-AUC` ($0{,}7920$) dowodzi, że sama liczba zwycięstw nie wystarcza do odróżnienia zespołów z silnych konferencji od drużyn nabijających bilans na słabszych rywalach. Stanowi to bezpośrednie uzasadnienie dla wprowadzenia w kolejnym kroku metryk korygowanych o siłę przeciwnika (`WAB`, `BARTHAG`, `ADJOE`, `ADJDE`).
+
+# Wykresy
+
+Krzywa regresji logistycznej dla liczby zwycięstw (W) na zbiorze treningowym
+
+```{r}
+#| fig-width: 9
+#| fig-height: 5.5
+grid_w <- tibble(W = seq(min(train_win$W), max(train_win$W), length.out = 200)) |>
+  mutate(prob = predict(model_w, newdata = pick(everything()), type = "response"))
+
+ggplot(train_win, aes(x = W, y = in_tourney)) +
+  geom_jitter(aes(color = in_tourney_f), height = 0.04, width = 0.25, alpha = 0.25) +
+  geom_line(data = grid_w, aes(x = W, y = prob), color = "#1f4e78", linewidth = 1.2) +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "grey40") +
+  geom_vline(xintercept = -coef(model_w)[1] / coef(model_w)[2], linetype = "dotted", color = "#c00000") +
+  scale_color_manual(values = c("No" = "#b0b0b0", "Yes" = "#d95f02"), name = "Awans do turnieju") +
+  labs(
+    title = "Prawdopodobieństwo awansu do March Madness w zależności od liczby zwycięstw (W)",
+    subtitle = "Krzywa regresji logistycznej (2013–2023); linia pionowa oznacza próg p = 0,50 (~23 wygrane)",
+    x = "Liczba zwycięstw w sezonie (W)",
+    y = "Przewidywane prawdopodobieństwo awansu"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+Porównanie krzywych ROC oraz Precision-Recall (W vs WIN_PCT) na zbiorze testowym 2024  
+
+```{r}
+roc_df <- bind_rows(
+  tibble(
+    FPR = 1 - roc_w$specificities,
+    TPR = roc_w$sensitivities,
+    Model = paste0("Liczba zwycięstw W (AUC = ", round(pROC::auc(roc_w), 3), ")")
+  ),
+  tibble(
+    FPR = 1 - roc_wp$specificities,
+    TPR = roc_wp$sensitivities,
+    Model = paste0("Odsetek zwycięstw WIN_PCT (AUC = ", round(pROC::auc(roc_wp), 3), ")")
+  )
+)
+
+ggplot(roc_df, aes(x = FPR, y = TPR, color = Model)) +
+  geom_line(linewidth = 1.1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") +
+  scale_color_manual(values = c("#1b9e77", "#7570b3")) +
+  labs(
+    title = "Porównanie krzywych ROC na zbiorze testowym (sezon 2024)",
+    x = "Odsetek fałszywie pozytywnych (1 - Specyficzność)",
+    y = "Czułość (TPR / Recall)",
+    color = NULL
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+Wykres Precision-Recall (kluczowy przy klasach niezbalansowanych ~19% awansów)
+
+```{r}
+pr_w_full <- PRROC::pr.curve(
+  scores.class0 = test_win$pred_prob[test_win$in_tourney == 1],
+  scores.class1 = test_win$pred_prob[test_win$in_tourney == 0],
+  curve = TRUE
+)
+pr_wp_full <- PRROC::pr.curve(
+  scores.class0 = test_winp$pred_prob[test_winp$in_tourney == 1],
+  scores.class1 = test_winp$pred_prob[test_winp$in_tourney == 0],
+  curve = TRUE
+)
+
+pr_df <- bind_rows(
+  tibble(
+    Recall = pr_w_full$curve[, 1],
+    Precision = pr_w_full$curve[, 2],
+    Model = paste0("Liczba zwycięstw W (PR-AUC = ", round(pr_w_full$auc.integral, 3), ")")
+  ),
+  tibble(
+    Recall = pr_wp_full$curve[, 1],
+    Precision = pr_wp_full$curve[, 2],
+    Model = paste0("Odsetek zwycięstw WIN_PCT (PR-AUC = ", round(pr_wp_full$auc.integral, 3), ")")
+  )
+)
+
+ggplot(pr_df, aes(x = Recall, y = Precision, color = Model)) +
+  geom_line(linewidth = 1.1) +
+  geom_hline(yintercept = mean(test_win$in_tourney), linetype = "dashed", color = "grey50") +
+  scale_color_manual(values = c("#1b9e77", "#7570b3")) +
+  labs(
+    title = "Porównanie krzywych Precision-Recall (sezon 2024)",
+    subtitle = "Linia przerywana oznacza losowy klasyfikator (~18,8% drużyn z awansem)",
+    x = "Czułość (Recall)",
+    y = "Precyzja (Precision)",
+    color = NULL
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+Lollipop plot: TOP 25 drużyn wg modelu W w 2024 r. i pułapka słabszych konferencji
+
+```{r}
+top25_2024 <- test_win |>
+  arrange(desc(pred_prob), desc(WIN_PCT)) |>
+  slice_head(n = 25) |>
+  mutate(
+    label = paste0(TEAM, " (", CONF, ", ", W, "-", G - W, ")"),
+    label = fct_reorder(label, pred_prob)
+  )
+
+ggplot(top25_2024, aes(x = pred_prob, y = label, color = in_tourney_f)) +
+  geom_segment(aes(x = 0, xend = pred_prob, y = label, yend = label), linewidth = 0.8, alpha = 0.6) +
+  geom_point(size = 3.2) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1), limits = c(0, 1)) +
+  scale_color_manual(
+    values = c("No" = "#d95f02", "Yes" = "#1b9e77"),
+    labels = c("No" = "Brak awansu (błąd FP)", "Yes" = "Awans do March Madness"),
+    name = "Rzeczywisty wynik"
+  ) +
+  labs(
+    title = "TOP 25 drużyn sezonu 2024 wg modelu opartego wyłącznie na zwycięstwach (W)",
+    subtitle = "Zespoły ze słabszych konferencji (np. Indiana St., Appalachian St.) otrzymują wysokie P(awans) mimo braku kwalifikacji",
+    x = "Przewidywane prawdopodobieństwo awansu",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "bottom")
+```
+
+
+
+
